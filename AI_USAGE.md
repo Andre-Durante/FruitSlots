@@ -35,6 +35,22 @@ Record AI-assisted project requests in chronological order only when the user ex
 
 **Validation:** `./mvnw -B clean verify` passed: 3 tests, 0 failures/errors, including Spring context startup and repository missing-ID, save, and replacement behavior. Executable JAR packaging succeeded. `git diff --check` passed.
 
+## 2026-09-27 — Core spin and jackpot (Part 1)
+
+**Tool:** OpenAI Codex
+
+**User prompt:**
+
+> **Core spin & jackpot (Part 1):**
+>
+> Four slots, each showing one of four colours (BLACK, WHITE, GREEN, YELLOW). Write a Colour/Slot domain model and a FruitMachine class with spin() that randomly picks a colour per slot and returns an outcome object, plus a jackpot check: true when all four slots match. Take a Random as a constructor dependency, don't instantiate it inside spin(). Write JUnit tests using a seeded/mocked random: jackpot detected when all four match, not detected otherwise.
+>
+> Add it to AI usage
+
+**Changes:** Added `Colour`, immutable `Slot` and `SpinOutcome` records, and `FruitMachine` with constructor-injected `Random`. Each spin independently selects four colours; `SpinOutcome.isJackpot()` checks whether all four match. Outcomes defensively copy their slots and require exactly four entries. Added deterministic JUnit tests using mocked random values and updated the README to describe the spin engine. The engine remains separate from repository identities and HTTP endpoints; no payout logic added.
+
+**Validation:** `./mvnw -B test` passed all 17 tests (14 domain cases plus 3 existing tests), with zero failures or errors. Coverage includes jackpots for every colour, a mismatch in every slot position, all four colours in order, successive spins, immutable outcomes, and invalid slot counts. The initial sandbox run failed because Mockito could not attach its JVM agent; the rerun with elevated permissions passed. `git diff --check` passed.
+
 ## Entry template
 
 - Date:

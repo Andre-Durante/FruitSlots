@@ -1,6 +1,6 @@
 # FruitSlots
 
-Java 21 / Spring Boot 4.1.1 application skeleton, generated with [Spring Initializr](https://start.spring.io/). No game logic is implemented.
+Java 21 / Spring Boot 4.1.1 application skeleton, generated with [Spring Initializr](https://start.spring.io/). Core spin logic selects one of four colours for each of four slots. A jackpot occurs when all four colours match.
 
 ## Run locally
 
@@ -22,7 +22,7 @@ Run the automated tests:
 ./mvnw test
 ```
 
-The current tests cover Spring context startup and repository lookup, save, and replacement behavior. They do not test game rules; none exist yet.
+The current tests cover Spring context startup and repository lookup, save, and replacement behavior. Domain tests use a mocked random source to cover matching and mixed colours, successive spins, and immutable four-slot outcomes.
 
 Run a clean build, including tests and executable JAR packaging:
 
@@ -48,13 +48,23 @@ With the application running, execute this in another terminal, or open [the hea
 
 Base package: `com.andredurante.fruitmachine`.
 
-- `domain`: minimal machine identity.
+- `domain`: machine identity, colours, slots, spin outcomes, and core spin logic.
 - `service`: machine service and repository interface.
 - `storage`: in-memory repository implementation.
 - `api`: HTTP endpoints, including the health check.
 - `config`: future application configuration.
 
 Dependencies: `spring-boot-starter-web`, `spring-boot-starter-validation`, `springdoc-openapi-starter-webmvc-ui`, `spring-boot-starter-actuator`, and `spring-boot-starter-test` (test scope).
+
+## Core spin
+
+```java
+FruitMachine machine = new FruitMachine(new Random());
+SpinOutcome outcome = machine.spin();
+boolean jackpot = outcome.isJackpot();
+```
+
+`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with exactly four slots, each showing BLACK, WHITE, GREEN, or YELLOW. The spin engine is not yet exposed through an HTTP endpoint or connected to stored machine identities. Payout logic is not implemented.
 
 ## Extension seams
 
@@ -75,7 +85,7 @@ The multi-stage image runs `mvn package` (including tests) with Maven and JDK 21
 
 Run either the local application or the container on port 8080. If that port is already occupied, use `-p 8081:8080` and check `http://localhost:8081/health` instead. Rebuild the image after source changes.
 
-The Docker build and all three tests passed locally, and the running container's `/health` endpoint returned HTTP 200 with `{"status":"UP"}`.
+The initial Docker skeleton was verified locally: its build and three tests passed, and the running container's `/health` endpoint returned HTTP 200 with `{"status":"UP"}`. Rebuild to include the core spin changes.
 
 ## Continuous integration
 
