@@ -14,6 +14,8 @@ public class FruitMachine {
     private final Random random;
     private final MachineConfiguration configuration;
     private long floatCents;
+    private final long playCostCents;
+    private final long startingFloatCents;
 
     public FruitMachine(Random random) {
         this(random, STARTING_FLOAT_CENTS);
@@ -29,6 +31,12 @@ public class FruitMachine {
     }
 
     public FruitMachine(Random random, long floatCents, MachineConfiguration configuration) {
+        this(random, floatCents, configuration, PLAY_COST_CENTS);
+    }
+
+    public FruitMachine(Random random, long floatCents, MachineConfiguration configuration, long playCostCents) {
+        this.playCostCents = playCostCents;
+        this.startingFloatCents = floatCents;
         this.configuration = Objects.requireNonNull(configuration, "configuration must not be null");
         this.random = Objects.requireNonNull(random, "random must not be null");
         if (floatCents < 0) {
@@ -41,13 +49,19 @@ public class FruitMachine {
         return floatCents;
     }
 
+    public MachineConfiguration configuration() { return configuration; }
+
+    public long startingFloatCents() { return startingFloatCents; }
+
+    public long playCostCents() { return playCostCents; }
+
     public PlayOutcome play() {
-        if (floatCents < PLAY_COST_CENTS) {
+        if (floatCents < playCostCents) {
             return new PlayOutcome(PrizeTier.INSUFFICIENT_FLOAT, Optional.empty(),
                     0, 0, 0, floatCents);
         }
 
-        floatCents -= PLAY_COST_CENTS;
+        floatCents -= playCostCents;
         SpinOutcome spin = spin();
         if (spin.isJackpot()) {
             return pay(PrizeTier.JACKPOT, spin, floatCents);
@@ -56,7 +70,7 @@ public class FruitMachine {
             return pay(PrizeTier.FULL_HOUSE, spin, floatCents / 2);
         }
         if (spin.hasMatchingRun(configuration.smallPrizeWindow())) {
-            return pay(PrizeTier.SMALL_PRIZE, spin, 5 * PLAY_COST_CENTS);
+            return pay(PrizeTier.SMALL_PRIZE, spin, 5 * playCostCents);
         }
         return pay(PrizeTier.NO_PRIZE, spin, 0);
     }
@@ -64,8 +78,8 @@ public class FruitMachine {
     private PlayOutcome pay(PrizeTier tier, SpinOutcome spin, long prizeCents) {
         long paidCents = Math.min(prizeCents, floatCents);
         long shortfall = prizeCents - paidCents;
-        long freePlays = shortfall / PLAY_COST_CENTS
-                + (shortfall % PLAY_COST_CENTS == 0 ? 0 : 1);
+        long freePlays = shortfall == 0 ? 0 : shortfall / playCostCents
+                + (shortfall % playCostCents == 0 ? 0 : 1);
         floatCents -= paidCents;
         return new PlayOutcome(tier, Optional.of(spin), prizeCents,
                 paidCents, freePlays, floatCents);

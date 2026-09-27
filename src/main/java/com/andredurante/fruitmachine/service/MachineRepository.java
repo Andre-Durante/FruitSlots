@@ -1,16 +1,9 @@
 package com.andredurante.fruitmachine.service;
-
 import java.util.Optional;
 import java.util.UUID;
-
-import com.andredurante.fruitmachine.domain.Machine;
-
-/** Storage boundary. IDs and machines must be non-null. */
+import com.andredurante.fruitmachine.domain.FruitMachine;
 public interface MachineRepository {
-    Optional<Machine> findById(UUID id);
-
-    /** Inserts or replaces the machine with the same ID and returns the saved value. */
-    Machine save(Machine machine);
-
+    Optional<FruitMachine> findById(UUID id);
+    FruitMachine save(UUID id, FruitMachine machine);
     boolean existsById(UUID id);
 }

@@ -4,7 +4,8 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
-import com.andredurante.fruitmachine.domain.Machine;
+import com.andredurante.fruitmachine.domain.FruitMachine;
+import java.util.Random;
 import com.andredurante.fruitmachine.service.MachineRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,16 +22,18 @@ class InMemoryMachineRepositoryTests {
 
     @Test
     void savesAndReplacesByIdWithoutAffectingOtherMachines() {
-        Machine original = new Machine(UUID.randomUUID());
-        Machine other = new Machine(UUID.randomUUID());
-        assertThat(repository.save(original)).isSameAs(original);
-        repository.save(other);
-        assertThat(repository.findById(original.id())).containsSame(original);
-        assertThat(repository.existsById(original.id())).isTrue();
+        UUID id = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        FruitMachine original = new FruitMachine(new Random(1));
+        FruitMachine other = new FruitMachine(new Random(2));
+        assertThat(repository.save(id, original)).isSameAs(original);
+        repository.save(otherId, other);
+        assertThat(repository.findById(id)).containsSame(original);
+        assertThat(repository.existsById(id)).isTrue();
 
-        Machine replacement = new Machine(original.id());
-        repository.save(replacement);
-        assertThat(repository.findById(original.id())).containsSame(replacement);
-        assertThat(repository.findById(other.id())).containsSame(other);
+        FruitMachine replacement = new FruitMachine(new Random(3));
+        repository.save(id, replacement);
+        assertThat(repository.findById(id)).containsSame(replacement);
+        assertThat(repository.findById(otherId)).containsSame(other);
     }
 }

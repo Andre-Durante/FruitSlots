@@ -48,7 +48,7 @@ With the application running, execute this in another terminal, or open [the hea
 
 Base package: `com.andredurante.fruitmachine`.
 
-- `domain`: machine identity, colours, slots, spin outcomes, and core spin logic.
+- `domain`: colours, slots, spin outcomes, and core spin logic.
 - `service`: machine service and repository interface.
 - `storage`: in-memory repository implementation.
 - `api`: HTTP endpoints, including the health check.
@@ -64,7 +64,34 @@ SpinOutcome outcome = machine.spin();
 boolean jackpot = outcome.isJackpot();
 ```
 
-`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with the configured number of slots and colours; the default palette is BLACK, WHITE, GREEN, and YELLOW. The spin engine is not yet exposed through an HTTP endpoint or connected to stored machine identities. Use `play()` for a charged play and payout settlement; `spin()` remains a slot-generation operation without financial effects.
+`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with the configured number of slots and colours; the default palette is BLACK, WHITE, GREEN, and YELLOW. The REST API exposes paid plays and stores machine state by UUID. Use `play()` for a charged play and payout settlement; `spin()` remains a slot-generation operation without financial effects.
+
+## REST API
+
+All monetary fields are **integer cents**. Start the application, then create a machine:
+
+```sh
+curl -i -X POST http://localhost:8080/machines \
+  -H 'Content-Type: application/json' \
+  -d '{"slotCount":4,"colours":["BLACK","WHITE","GREEN","YELLOW"],"k":2,"playCostCents":100,"startingFloatCents":100000}'
+```
+
+Creation returns **201**, a `Location: /machines/{id}` header, and a body containing `id`, `floatCents`, and `config` (slot count, colours, k, play cost, and initial float). Copy the returned ID into these commands:
+
+```sh
+curl http://localhost:8080/machines/REPLACE_WITH_ID
+curl -X POST http://localhost:8080/machines/REPLACE_WITH_ID/plays
+```
+
+GET returns the current balance and original configuration. A successful play returns **200** with `outcome`, `slots` (colour IDs), `prizeCents`, `paidCents`, `freePlaysCredited`, and the remaining `floatCents`. Credits refer to that play's shortfall; redemption is not implemented.
+
+All creation fields are required. Validation requires positive slot count, `1 <= k <= slotCount`, at least two distinct non-blank colour IDs (duplicates rejected), and non-negative cost and starting float. Cost is limited to `Long.MAX_VALUE / 5` so the five-times-cost prize fits in integer cents. Fractional numbers are rejected. Invalid input returns **400** with a clear `message`; malformed UUIDs return **400** and unknown IDs return **404**. Insufficient float returns **400** with the `INSUFFICIENT_FLOAT` outcome, empty slots, zero payout/credits, and unchanged balance.
+
+A zero-cost play is allowed: its small prize is zero, while jackpot/full-house still use the available float. No shortfall is possible at zero cost, so no division by zero or free-play credit occurs.
+
+`MachineService` has no Spring annotations. Configuration beans wire its repository and random-source factory; controllers validate and translate HTTP requests, while domain classes retain game rules. The repository holds a `Map<UUID, FruitMachine>` in memory, and **all machines disappear on restart**.
+
+Run HTTP integration tests with `./mvnw -Dtest=MachineApiTests test`.
 
 ## Generalised reels and colour IDs
 
@@ -100,13 +127,13 @@ Run the generalisation tests with `./mvnw -Dtest=GeneralisedMachineTests test`.
 
 ## Payouts and float
 
-A machine starts with **100,000 cents ($1,000)**. Each accepted `play()` subtracts the fixed **100-cent ($1)** cost from the float before evaluating prizes, then subtracts the cash payout. The cost is subtracted, not added, as specified.
+By default a machine starts with **100,000 cents ($1,000)** and costs **100 cents ($1)** per play; both are configurable at creation. Each accepted `play()` subtracts its configured cost from the float before evaluating prizes, then subtracts the cash payout. The cost is subtracted, not added, as specified.
 
 | Tier (checked in order) | Condition | Prize |
 | --- | --- | --- |
 | Jackpot | All slot colours match | Entire post-charge float |
 | Full house | All slot colours differ | Half the post-charge float, rounded down to cents |
-| Small prize | At least one consecutive run of k matching colours | 500 cents ($5), once per play |
+| Small prize | At least one consecutive run of k matching colours | 5 × configured cost, once per play |
 | No prize | None of the above | 0 |
 
 ```java
@@ -119,7 +146,7 @@ long remainingFloat = machine.floatCents();
 
 `PlayOutcome` reports a single `PrizeTier`, an optional spin, the nominal prize, cash paid, free plays credited for this play, and the remaining float. An insufficient-float result has no spin and zero prize, cash, and credits. Free-play credits are returned in the settlement; redemption is not implemented in this part.
 
-The constructor `FruitMachine(Random, long floatCents)` accepts an existing non-negative balance for restoration and boundary tests; the play cost remains fixed. For example, a 349-cent float becomes 249 cents after charging: a small prize pays that 249 cents and awards 3 free plays for the 251-cent shortfall. A 1,001-cent float becomes 901 cents, so a full house pays 450 cents and leaves 451 cents.
+The constructor `FruitMachine(Random, long floatCents)` accepts an existing non-negative balance for restoration and boundary tests; that overload uses the default cost. For example, a 349-cent float becomes 249 cents after charging: a small prize pays that 249 cents and awards 3 free plays for the 251-cent shortfall. A 1,001-cent float becomes 901 cents, so a full house pays 450 cents and leaves 451 cents.
 
 ## Key decisions
 
@@ -138,7 +165,7 @@ The following decisions govern the implemented payout rules.
 
 ## Extension seams
 
-`MachineService` receives `MachineRepository` through constructor injection. The sole implementation, `InMemoryMachineRepository`, stores immutable `Machine` records by UUID in a `ConcurrentHashMap`. Saving inserts or replaces by ID; an unknown ID returns an empty `Optional`. Data is lost on restart. A future datastore adapter should replace the in-memory Spring bean while preserving the interface.
+`MachineService` receives `MachineRepository` through constructor injection. The sole implementation, `InMemoryMachineRepository`, stores `FruitMachine` instances by UUID in a `ConcurrentHashMap`. Saving inserts or replaces by ID; an unknown ID returns an empty `Optional`. Data is lost on restart. A future datastore adapter should replace the in-memory Spring bean while preserving the interface.
 
 Springdoc and Actuator use their dependency defaults; no custom annotations, configuration, logging, or metrics code have been added.
 
@@ -162,6 +189,10 @@ The initial Docker skeleton was verified locally: its build and three tests pass
 [The GitHub Actions workflow](.github/workflows/ci.yml) runs `mvn test` with Java 21 on pushes and pull requests. It has no deployment step or build matrix. View results in the repository's **Actions** tab after pushing; a hosted CI run has not yet been verified.
 
 Keep the POM, Docker image tags, and CI Java version aligned when upgrading Java.
+
+## What I left out
+
+Persistence across restarts, concurrency control for simultaneous plays on one machine, authentication, rate limiting, and free-play redemption. The concurrent map protects map operations, not multi-step balance changes inside an individual machine.
 
 ## AI usage
 

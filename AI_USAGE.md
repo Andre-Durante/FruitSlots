@@ -76,6 +76,21 @@ Record AI-assisted project requests in chronological order only when the user ex
 
 **Validation:** `./mvnw -B test` passed all 40 tests, including the unchanged payout suite and 11 generalisation tests. Coverage includes 500 colours, configurable slots and k, no wrapping or combining runs, k=1 and k=N, value equality, palette immutability, invalid configurations, generalized prize precedence, and a 150,000-slot row. Removed the old invalid-length cases for 3 and 5 slots, which are now valid. `git diff --check` passed.
 
+## 2026-09-27 — REST layer
+
+**Tool:** OpenAI Codex
+
+**User prompt:**
+
+> **REST layer**
+>
+> Wrap FruitMachine in a Spring Boot REST API: POST /machines/{id}/plays (spin, return outcome + float + free plays credited), GET /machines/{id} (current float and config), POST /machines (configure: slot count, colours, k, play cost, starting float). Game logic stays in a plain service class with no Spring annotations — the web layer only translates HTTP to it. State lives in an in-memory map keyed by id; note in a comment that it isn't persisted across restarts. Validate: positive slot count, k <= slot count, at least 2 distinct colours, non-negative cost/float — map failures to 400 with a clear message.
+
+
+**Changes:** Added creation, retrieval, and play REST endpoints with DTOs and API-boundary validation. Removed Spring annotations from the service and wired it through configuration beans with an injected random factory. Replaced identity-only repository values with actual `FruitMachine` state, keyed by UUID, and documented loss on restart in code and README. Made play cost configurable; zero-cost plays avoid shortfall division when no shortfall exists. Creation returns 201/Location, unknown IDs return 404, invalid input returns 400/message, and insufficient float returns 400 with its distinct outcome. Added strict integer parsing and an upper cost bound ensuring 5x cost fits in long cents. Updated README with curl examples, response fields, validation, and limitations.
+
+**Validation:** `./mvnw -B test` passed all 54 tests, including 14 real HTTP integration cases. Tests exercise create/get/play/state retrieval, custom-cost shortfall credits, depleted float, zero-cost plays, malformed JSON/IDs, unknown IDs, missing and invalid fields, duplicate/insufficient palettes, fractional cents, and overflow bounds. Existing game/payout tests pass. `git diff --check` passed.
+
 ## Entry template
 
 - Date:
