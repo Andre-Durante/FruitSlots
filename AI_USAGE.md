@@ -51,6 +51,16 @@ Record AI-assisted project requests in chronological order only when the user ex
 
 **Validation:** `./mvnw -B test` passed all 17 tests (14 domain cases plus 3 existing tests), with zero failures or errors. Coverage includes jackpots for every colour, a mismatch in every slot position, all four colours in order, successive spins, immutable outcomes, and invalid slot counts. The initial sandbox run failed because Mockito could not attach its JVM agent; the rerun with elevated permissions passed. `git diff --check` passed.
 
+## 2026-09-27 — Payouts and float (Part 2)
+
+**Tool:** OpenAI Codex
+
+**User prompt (summary):** Extend `FruitMachine` with a $1 fixed play cost and $1,000 starting float. Charge the float before evaluation. Jackpot (all colours equal) pays the entire float; full house (all colours different) pays half; small prize (two or more adjacent equal colours, fixed k=2) pays five times the cost. Implement seven resolved decisions exactly and record each with its reasoning in README: linear adjacency without wrapping; exclusive jackpot precedence; cost deducted before prize evaluation; integer cents (`long`) with half-float rounded down; shortfall free-play credit of `ceil(shortfall / cost)` (never needed for jackpot); one flat small-prize payout regardless of run count; and insufficient-float rejection without spinning, charging, or state mutation. Write explicit tests for every decision and add the work to AI usage.
+
+**Changes:** Added the float, fixed cost, and `play()` settlement to `FruitMachine`, plus `PrizeTier` and immutable `PlayOutcome`. The default balance is 100,000 cents; an overload permits an existing non-negative balance. Prize evaluation short-circuits by tier. Cash payout is capped at the remaining float and unpaid amounts produce rounded-up per-play credits. Added full-house and linear adjacent-pair checks to `SpinOutcome`. Preserved `spin()` as slot generation. Updated README with payout rules, usage examples, and one decision-and-reason bullet per requested decision. Free-play redemption and HTTP integration remain outside this part.
+
+**Validation:** `./mvnw -B test` passed all 31 tests, with zero failures/errors, including 14 payout test cases. Explicit tests cover matching row ends without adjacency, jackpot exclusivity, post-charge jackpot calculation, half-cent rounding, a 251-cent shortfall, two distinct matching runs paying once, and rejection below cost without random calls or mutation. Additional cases cover exact shortfalls, three-slot runs, a balance equal to cost, repeated play after depletion, initial balance, and negative-balance rejection. `git diff --check` passed.
+
 ## Entry template
 
 - Date:

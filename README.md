@@ -22,7 +22,7 @@ Run the automated tests:
 ./mvnw test
 ```
 
-The current tests cover Spring context startup and repository lookup, save, and replacement behavior. Domain tests use a mocked random source to cover matching and mixed colours, successive spins, and immutable four-slot outcomes.
+The current tests cover Spring context startup and repository lookup, save, and replacement behavior. Domain tests use a mocked random source to cover matching and mixed colours, successive spins, immutable four-slot outcomes, and all seven payout decisions. Run only the payout tests with `./mvnw -Dtest=FruitMachinePayoutTests test`.
 
 Run a clean build, including tests and executable JAR packaging:
 
@@ -64,7 +64,42 @@ SpinOutcome outcome = machine.spin();
 boolean jackpot = outcome.isJackpot();
 ```
 
-`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with exactly four slots, each showing BLACK, WHITE, GREEN, or YELLOW. The spin engine is not yet exposed through an HTTP endpoint or connected to stored machine identities. Payout logic is not implemented.
+`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with exactly four slots, each showing BLACK, WHITE, GREEN, or YELLOW. The spin engine is not yet exposed through an HTTP endpoint or connected to stored machine identities. Use `play()` for a charged play and payout settlement; `spin()` remains a slot-generation operation without financial effects.
+
+## Payouts and float
+
+A machine starts with **100,000 cents ($1,000)**. Each accepted `play()` subtracts the fixed **100-cent ($1)** cost from the float before evaluating prizes, then subtracts the cash payout. The cost is subtracted, not added, as specified.
+
+| Tier (checked in order) | Condition | Prize |
+| --- | --- | --- |
+| Jackpot | All four colours match | Entire post-charge float |
+| Full house | All four colours differ | Half the post-charge float, rounded down to cents |
+| Small prize | At least one matching adjacent pair | 500 cents ($5), once per play |
+| No prize | None of the above | 0 |
+
+```java
+FruitMachine machine = new FruitMachine(new Random());
+PlayOutcome result = machine.play();
+long cashPaid = result.paidCents();
+long freePlayCredit = result.freePlays();
+long remainingFloat = machine.floatCents();
+```
+
+`PlayOutcome` reports a single `PrizeTier`, an optional spin, the nominal prize, cash paid, free plays credited for this play, and the remaining float. An insufficient-float result has no spin and zero prize, cash, and credits. Free-play credits are returned in the settlement; redemption is not implemented in this part.
+
+The constructor `FruitMachine(Random, long floatCents)` accepts an existing non-negative balance for restoration and boundary tests; the play cost remains fixed. For example, a 349-cent float becomes 249 cents after charging: a small prize pays that 249 cents and awards 3 free plays for the 251-cent shortfall. A 1,001-cent float becomes 901 cents, so a full house pays 450 cents and leaves 451 cents.
+
+## Key decisions
+
+The following decisions govern the implemented payout rules.
+
+- **Adjacency is linear, with no wrap:** the last and first slots are never adjacent. This matches reels read left-to-right and allows an O(n) streak counter without a wrap-around special case.
+- **Jackpot takes exclusive precedence over small-prize:** check jackpot first and short-circuit when all slots match. Paying both tiers on one spin would undercut the jackpot as the top tier, so it is checked and short-circuited first.
+- **Deduct the play cost before computing a prize:** subtract the cost from the float, then evaluate jackpot, full-house, or small-prize using the remaining balance. This follows the specified accounting order and prevents the jackpot from including money attributed to the same play.
+- **Money uses integer cents (`long`), and half the float rounds down:** integer arithmetic avoids floating-point rounding errors, and rounding down prevents paying a fraction more than the available float.
+- **Shortfalls award `ceil(shortfall / cost)` free plays:** pay the available cash and credit free plays for the unpaid amount. Jackpot cannot fall short because its prize is the entire available float. Rounding up compensates the full shortfall; rounding down would under-compensate the player.
+- **At most one flat small-prize payout per play:** separate adjacent runs do not stack payouts. The brief describes a single outcome tier and does not ask for per-run bonuses.
+- **Reject a play when the float is below the play cost:** return a distinct insufficient-float outcome without spinning, charging, or mutating state. A negative float is not meaningful, and the distinct outcome can later support an API 4xx response.
 
 ## Extension seams
 

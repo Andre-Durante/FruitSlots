@@ -11,6 +11,19 @@ public record SpinOutcome(List<Slot> slots) {
         }
     }
 
+    public boolean isFullHouse() {
+        return slots.stream().map(Slot::colour).distinct().count() == slots.size();
+    }
+
+    public boolean hasAdjacentMatch() {
+        for (int i = 1; i < slots.size(); i++) {
+            if (slots.get(i - 1).colour() == slots.get(i).colour()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean isJackpot() {
         Colour first = slots.getFirst().colour();
         return slots.stream().allMatch(slot -> slot.colour() == first);
