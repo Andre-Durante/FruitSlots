@@ -7,13 +7,12 @@ import java.util.Random;
 import java.util.Optional;
 
 public class FruitMachine {
-    public static final int SLOT_COUNT = 4;
-    private static final Colour[] COLOURS = Colour.values();
 
     public static final long PLAY_COST_CENTS = 100L;
     public static final long STARTING_FLOAT_CENTS = 100_000L;
 
     private final Random random;
+    private final MachineConfiguration configuration;
     private long floatCents;
 
     public FruitMachine(Random random) {
@@ -22,6 +21,15 @@ public class FruitMachine {
 
     /** Allows an existing balance to be restored, including balances below the play cost. */
     public FruitMachine(Random random, long floatCents) {
+        this(random, floatCents, MachineConfiguration.DEFAULT);
+    }
+
+    public FruitMachine(Random random, MachineConfiguration configuration) {
+        this(random, STARTING_FLOAT_CENTS, configuration);
+    }
+
+    public FruitMachine(Random random, long floatCents, MachineConfiguration configuration) {
+        this.configuration = Objects.requireNonNull(configuration, "configuration must not be null");
         this.random = Objects.requireNonNull(random, "random must not be null");
         if (floatCents < 0) {
             throw new IllegalArgumentException("float must not be negative");
@@ -47,7 +55,7 @@ public class FruitMachine {
         if (spin.isFullHouse()) {
             return pay(PrizeTier.FULL_HOUSE, spin, floatCents / 2);
         }
-        if (spin.hasAdjacentMatch()) {
+        if (spin.hasMatchingRun(configuration.smallPrizeWindow())) {
             return pay(PrizeTier.SMALL_PRIZE, spin, 5 * PLAY_COST_CENTS);
         }
         return pay(PrizeTier.NO_PRIZE, spin, 0);
@@ -65,9 +73,9 @@ public class FruitMachine {
 
     /** Generates slots only; use play() to charge and settle a paid play. */
     public SpinOutcome spin() {
-        List<Slot> slots = new ArrayList<>(SLOT_COUNT);
-        for (int i = 0; i < SLOT_COUNT; i++) {
-            slots.add(new Slot(COLOURS[random.nextInt(COLOURS.length)]));
+        List<Slot> slots = new ArrayList<>(configuration.slotCount());
+        for (int i = 0; i < configuration.slotCount(); i++) {
+            slots.add(new Slot(configuration.colours().get(random.nextInt(configuration.colours().size()))));
         }
         return new SpinOutcome(slots);
     }

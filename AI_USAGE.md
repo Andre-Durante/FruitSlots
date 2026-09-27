@@ -61,6 +61,21 @@ Record AI-assisted project requests in chronological order only when the user ex
 
 **Validation:** `./mvnw -B test` passed all 31 tests, with zero failures/errors, including 14 payout test cases. Explicit tests cover matching row ends without adjacency, jackpot exclusivity, post-charge jackpot calculation, half-cent rounding, a 251-cent shortfall, two distinct matching runs paying once, and rejection below cost without random calls or mutation. Additional cases cover exact shortfalls, three-slot runs, a balance equal to cost, repeated play after depletion, initial balance, and negative-balance rejection. `git diff --check` passed.
 
+## 2026-09-27 — Generalise and scale
+
+**Tool:** OpenAI Codex
+
+**User prompt:**
+
+> **Generalise & scale**
+>
+> Generalise the machine: N slots, M colours (potentially hundreds), and a small-prize window k (not fixed at 2), same rules otherwise. My current small-prize check is an O(n·k) nested loop — show me how to make it O(n) with a running streak counter instead, without touching the payout logic. Also: with hundreds of colours, should the colour set stay a fixed enum, or become a configurable list/id per machine? Argue both sides in two sentences before you touch code.
+
+
+**Changes:** Compared enum and configurable palette options before editing. Replaced the fixed enum with a colour-ID value record and added immutable per-machine `MachineConfiguration` for N, palette (M), and k, preserving the four-slot/four-colour/k=2 defaults. Spins sample the configured palette and produce N slots. Replaced the fixed adjacent-pair predicate with a running streak counter; the previous k=2 implementation was already O(n), and the generalised check remains O(n) time/O(1) auxiliary space. Matching uses colour-ID value equality. Payout calculations and settlement are unchanged. Updated README with examples, configuration boundaries, decisions, and the algorithm explanation.
+
+**Validation:** `./mvnw -B test` passed all 40 tests, including the unchanged payout suite and 11 generalisation tests. Coverage includes 500 colours, configurable slots and k, no wrapping or combining runs, k=1 and k=N, value equality, palette immutability, invalid configurations, generalized prize precedence, and a 150,000-slot row. Removed the old invalid-length cases for 3 and 5 slots, which are now valid. `git diff --check` passed.
+
 ## Entry template
 
 - Date:

@@ -6,7 +6,6 @@ import java.util.Random;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -18,10 +17,11 @@ import static org.mockito.Mockito.when;
 
 class FruitMachineTests {
     @ParameterizedTest
-    @EnumSource(Colour.class)
-    void detectsJackpotForEveryColour(Colour colour) {
+    @ValueSource(ints = {0, 1, 2, 3})
+    void detectsJackpotForEveryColour(int colourIndex) {
+        Colour colour = MachineConfiguration.DEFAULT.colours().get(colourIndex);
         Random random = mock(Random.class);
-        when(random.nextInt(4)).thenReturn(colour.ordinal());
+        when(random.nextInt(4)).thenReturn(colourIndex);
 
         SpinOutcome outcome = new FruitMachine(random).spin();
 
@@ -85,8 +85,8 @@ class FruitMachineTests {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {0, 3, 5})
-    void rejectsOutcomesWithoutExactlyFourSlots(int count) {
+    @ValueSource(ints = {0})
+    void rejectsEmptyOutcomes(int count) {
         List<Slot> slots = java.util.Collections.nCopies(count, new Slot(Colour.BLACK));
         assertThatThrownBy(() -> new SpinOutcome(slots))
                 .isInstanceOf(IllegalArgumentException.class);

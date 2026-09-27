@@ -1,6 +1,6 @@
 # FruitSlots
 
-Java 21 / Spring Boot 4.1.1 application skeleton, generated with [Spring Initializr](https://start.spring.io/). Core spin logic selects one of four colours for each of four slots. A jackpot occurs when all four colours match.
+Java 21 / Spring Boot 4.1.1 application skeleton, generated with [Spring Initializr](https://start.spring.io/). Core spin logic supports N slots, a per-machine palette of M colour IDs, and a small-prize run length k. Defaults are four slots, four colours, and k=2. A jackpot occurs when all slots match.
 
 ## Run locally
 
@@ -22,7 +22,7 @@ Run the automated tests:
 ./mvnw test
 ```
 
-The current tests cover Spring context startup and repository lookup, save, and replacement behavior. Domain tests use a mocked random source to cover matching and mixed colours, successive spins, immutable four-slot outcomes, and all seven payout decisions. Run only the payout tests with `./mvnw -Dtest=FruitMachinePayoutTests test`.
+The current tests cover Spring context startup and repository lookup, save, and replacement behavior. Domain tests use a mocked random source to cover matching and mixed colours, successive spins, immutable spin outcomes, and all seven payout decisions. Run only the payout tests with `./mvnw -Dtest=FruitMachinePayoutTests test`.
 
 Run a clean build, including tests and executable JAR packaging:
 
@@ -64,7 +64,39 @@ SpinOutcome outcome = machine.spin();
 boolean jackpot = outcome.isJackpot();
 ```
 
-`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with exactly four slots, each showing BLACK, WHITE, GREEN, or YELLOW. The spin engine is not yet exposed through an HTTP endpoint or connected to stored machine identities. Use `play()` for a charged play and payout settlement; `spin()` remains a slot-generation operation without financial effects.
+`FruitMachine`, `SpinOutcome`, `Slot`, and `Colour` live in the domain package; `Random` is `java.util.Random`. The caller supplies the random source once. Each spin returns an immutable outcome with the configured number of slots and colours; the default palette is BLACK, WHITE, GREEN, and YELLOW. The spin engine is not yet exposed through an HTTP endpoint or connected to stored machine identities. Use `play()` for a charged play and payout settlement; `spin()` remains a slot-generation operation without financial effects.
+
+## Generalised reels and colour IDs
+
+```java
+MachineConfiguration configuration = new MachineConfiguration(
+        6, List.of(new Colour("RED"), new Colour("BLUE"), new Colour("GOLD")), 3);
+FruitMachine machine = new FruitMachine(new Random(), configuration);
+PlayOutcome result = machine.play();
+```
+
+The palette is an immutable per-machine list; M is its size. IDs are non-blank, case-sensitive strings and must be unique within the palette. `Colour` is a value record: equal IDs match even when represented by different Java objects. The named default colours remain constants for convenience, not an exhaustive enum. Each slot samples uniformly from the configured palette using the injected `Random`.
+
+N must be positive, the palette must be non-empty, and `1 <= k <= N`. k=1 qualifies any spin for the small-prize check, but jackpot and full-house still take precedence. With N=1, jackpot takes precedence. Full house means every slot differs, not that every available colour appears; when N exceeds M, full house is impossible. These are configuration value invariants; no new service or HTTP validation flow is introduced.
+
+### Linear-time small-prize detection
+
+The previous k=2 implementation already scanned adjacent pairs in O(n). For configurable k, keep a running streak rather than rescanning each candidate window:
+
+```java
+int streak = 1;
+if (streak >= k) return true;
+for (int i = 1; i < slots.size(); i++) {
+    streak = slots.get(i - 1).colour().equals(slots.get(i).colour())
+            ? streak + 1 : 1;
+    if (streak >= k) return true;
+}
+return false;
+```
+
+Each neighbouring pair is compared once: **O(n) time and O(1) extra space**, independent of k (treating colour-ID comparison as constant cost). A mismatch resets the streak to one; row ends are never joined, and separate runs do not accumulate. Only qualification changed: prize calculation and float settlement are unchanged. `SpinOutcome` now requires a non-empty row rather than exactly four slots; `FruitMachine` produces exactly its configured N slots.
+
+Run the generalisation tests with `./mvnw -Dtest=GeneralisedMachineTests test`.
 
 ## Payouts and float
 
@@ -72,9 +104,9 @@ A machine starts with **100,000 cents ($1,000)**. Each accepted `play()` subtrac
 
 | Tier (checked in order) | Condition | Prize |
 | --- | --- | --- |
-| Jackpot | All four colours match | Entire post-charge float |
-| Full house | All four colours differ | Half the post-charge float, rounded down to cents |
-| Small prize | At least one matching adjacent pair | 500 cents ($5), once per play |
+| Jackpot | All slot colours match | Entire post-charge float |
+| Full house | All slot colours differ | Half the post-charge float, rounded down to cents |
+| Small prize | At least one consecutive run of k matching colours | 500 cents ($5), once per play |
 | No prize | None of the above | 0 |
 
 ```java
@@ -100,6 +132,9 @@ The following decisions govern the implemented payout rules.
 - **Shortfalls award `ceil(shortfall / cost)` free plays:** pay the available cash and credit free plays for the unpaid amount. Jackpot cannot fall short because its prize is the entire available float. Rounding up compensates the full shortfall; rounding down would under-compensate the player.
 - **At most one flat small-prize payout per play:** separate adjacent runs do not stack payouts. The brief describes a single outcome tier and does not ask for per-run bonuses.
 - **Reject a play when the float is below the play cost:** return a distinct insufficient-float outcome without spinning, charging, or mutating state. A negative float is not meaningful, and the distinct outcome can later support an API 4xx response.
+
+- **Use a configurable palette of colour IDs rather than an enum:** machines can have different palettes containing hundreds of colours without changing application code; value equality gives stable matching semantics.
+- **Detect k-length runs with a running streak:** one pass and constant auxiliary space avoid O(n·k) window rescans as slot counts and k grow.
 
 ## Extension seams
 
