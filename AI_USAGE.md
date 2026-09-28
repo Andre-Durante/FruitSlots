@@ -9,8 +9,6 @@ Record AI-assisted project requests in chronological order only when the user ex
 **User prompt:**
 
 > Set up a java maven Spring Boot project (use spring initializr if possible) with dependencies: spring-boot-starter-web, spring-boot-starter-validation, spring-boot-starter-test. Package structure com.\<name>.fruitmachine with domain, service, api, config packages. Don't write any game logic yet just the skeleton, build file, and a health check endpoint.
->
-> Add an AI Usage log for this project so we can track what's been prompted
 
 **Changes:** Generated a Java 21 Maven project using Spring Initializr. Selected `com.andredurante.fruitmachine` based on the workspace username. Normalized the generated Spring Boot version to the published Maven Central version `4.1.1` and adjusted starters to the three explicitly requested dependencies. Added the four packages, `GET /health`, Maven wrapper, setup documentation, and this log. No game logic added.
 
@@ -44,8 +42,6 @@ Record AI-assisted project requests in chronological order only when the user ex
 > **Core spin & jackpot (Part 1):**
 >
 > Four slots, each showing one of four colours (BLACK, WHITE, GREEN, YELLOW). Write a Colour/Slot domain model and a FruitMachine class with spin() that randomly picks a colour per slot and returns an outcome object, plus a jackpot check: true when all four slots match. Take a Random as a constructor dependency, don't instantiate it inside spin(). Write JUnit tests using a seeded/mocked random: jackpot detected when all four match, not detected otherwise.
->
-> Add it to AI usage
 
 **Changes:** Added `Colour`, immutable `Slot` and `SpinOutcome` records, and `FruitMachine` with constructor-injected `Random`. Each spin independently selects four colours; `SpinOutcome.isJackpot()` checks whether all four match. Outcomes defensively copy their slots and require exactly four entries. Added deterministic JUnit tests using mocked random values and updated the README to describe the spin engine. The engine remains separate from repository identities and HTTP endpoints; no payout logic added.
 
@@ -100,8 +96,7 @@ Record AI-assisted project requests in chronological order only when the user ex
 > **Poke holes, don't patch yet**
 >
 > Review FruitMachine and the REST layer as a strict reviewer. List edge cases I'm missing. free plays interacting with a play that itself can't be paid, a machine configured with one colour, k=1, concurrent plays hitting the same machine id. Don't fix anything, just list them with one line each on why they matter.
->
-> Add to AI usage
+
 
 **Review findings:** Free-play credits are returned but not stored or redeemable, and shortfall settlement empties the float so the next positive-cost play is rejected. A one-colour palette is rejected by REST but accepted by the domain and guarantees jackpots. k=1 eliminates no-prize outcomes; N=1 guarantees jackpots; k=N makes the small-prize tier unreachable due to jackpot precedence; N>M makes full house impossible. Concurrent plays and reads are not atomic. Retried POST requests can create additional plays/charges. Slot count, palette size, and machine count have no application-level resource caps. A failure after cost deduction can leave state changed without a successful response. Zero-cost play is allowed even at zero float. Direct domain callers can bypass API cost bounds and trigger invalid arithmetic. Colour IDs distinguish case and whitespace. Some are intentional rules or documented exclusions, not implementation defects.
 
@@ -113,7 +108,7 @@ Record AI-assisted project requests in chronological order only when the user ex
 
 **Tool:** OpenAI Codex
 
-**User prompt (summary):** Fix only three reviewed issues: store and consume free-play credits before paid plays; reject play cost <= 0 in configuration validation; generate and classify the full spin before charging or applying payouts. Document the remaining review cases as “Expected behaviour, not a bug” (one colour, k=1, k=N, one slot, N>M, validated-input trust) and “Left out, would add with more time” (concurrency, intermediate GETs, POST retries, resource bounds), one line each with consequences/reasoning or proposed remedies. Add to AI usage.
+**User prompt (summary):** Fix only three reviewed issues: store and consume free-play credits before paid plays; reject play cost <= 0 in configuration validation; generate and classify the full spin before charging or applying payouts. Document the remaining review cases as “Expected behaviour, not a bug” (one colour, k=1, k=N, one slot, N>M, validated-input trust) and “Left out, would add with more time” (concurrency, intermediate GETs, POST retries, resource bounds), one line each with consequences/reasoning or proposed remedies.
 
 **Changes:** Added a machine-level free-play counter, consumed only after successful generation/classification and replenished by shortfall awards. Credits bypass the paid-play float check and cost charge. GET machine includes the remaining `freePlays`; play responses retain the newly credited count. API cost validation now requires a strictly positive value. Split outcome classification from financial settlement, retaining post-charge payout computation for paid plays. Updated README semantics and the two requested review groups. No concurrency, idempotency, resource-limit, colour, or k-rule fixes were made.
 
