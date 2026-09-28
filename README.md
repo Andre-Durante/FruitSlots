@@ -1,6 +1,17 @@
 # FruitSlots
 
-Java 21 / Spring Boot 4.1.1 application skeleton, generated with [Spring Initializr](https://start.spring.io/). Core spin logic supports N slots, a per-machine palette of M colour IDs, and a small-prize run length k. Defaults are four slots, four colours, and k=2. A jackpot occurs when all slots match.
+Java 21 / Spring Boot 4.1.1 REST service, bootstrapped with [Spring Initializr](https://start.spring.io/). Core spin logic supports N slots, a per-machine palette of M colour IDs, and a small-prize run length k. Defaults are four slots, four colours, and k=2. A jackpot occurs when all slots match.
+
+## Quick navigation
+
+- [Run locally](#run-locally)
+- [Test in Swagger](#test-in-swagger)
+- [Automated tests and build](#test-and-build)
+- [REST API and curl examples](#rest-api)
+- [Payouts and float](#payouts-and-float)
+- [Key decisions](#key-decisions)
+- [Docker](#docker)
+- [What I left out](#what-i-left-out)
 
 ## Run locally
 
@@ -14,6 +25,62 @@ The application listens on port 8080. Stop it with **Ctrl+C**.
 
 On Windows, use `mvnw.cmd` instead of `./mvnw`.
 
+## Test in Swagger
+
+With the application running, open [Swagger UI](http://localhost:8080/swagger-ui/index.html). The OpenAPI JSON is available at [GET /v3/api-docs](http://localhost:8080/v3/api-docs).
+
+1. Expand **POST /machines** and click **Try it out**.
+2. Paste the request below and click **Execute**.
+3. Expect **201 Created**. Copy the `id` from the response body.
+4. Expand **GET /machines/{id}**, click **Try it out**, paste the ID, and execute. Expect **200** with the current `floatCents` and `config`.
+5. Execute **POST /machines/{id}/plays** using the same ID. No request body is needed. Expect **200** with the spin and settlement.
+6. GET the machine again: its float should equal the preceding play's `floatCents`. Its original configuration stays unchanged.
+
+```json
+{
+  "slotCount": 4,
+  "colours": ["BLACK", "WHITE", "GREEN", "YELLOW"],
+  "k": 2,
+  "playCostCents": 100,
+  "startingFloatCents": 100000
+}
+```
+
+A possible first-play response is:
+
+```json
+{
+  "outcome": "SMALL_PRIZE",
+  "slots": ["BLACK", "WHITE", "BLACK", "BLACK"],
+  "prizeCents": 500,
+  "paidCents": 500,
+  "freePlaysCredited": 0,
+  "floatCents": 99400
+}
+```
+
+The adjacent BLACK pair wins one $5 prize: $1,000 − $1 cost − $5 paid = $994. Spins are random, so your colours and prize may differ. Use the deterministic JUnit tests below to verify particular winning patterns rather than repeatedly spinning until one appears.
+
+### Manual validation checklist
+
+For each creation case, start with the sample request and change the specified fields:
+
+| Case | Expected result |
+| --- | --- |
+| `slotCount: 0` | 400 with validation message |
+| `k: 0` or `k: 5` with four slots | 400 |
+| One colour, duplicate IDs, or a blank colour ID | 400 |
+| Negative `playCostCents` or `startingFloatCents` | 400 |
+| Fractional cents, such as `playCostCents: 100.5` | 400 |
+| Omit a required field | 400 |
+| `startingFloatCents: 99`, `playCostCents: 100` | Creation returns 201; play returns 400 `INSUFFICIENT_FLOAT`; GET still shows 99 |
+| Cost and starting float both 0 | Creation and play succeed; no division-by-zero error |
+| GET or play with an unknown valid UUID | 404 |
+| GET with a malformed UUID | 400 |
+| Restart the app, then GET an old machine ID | 404: machines are not persisted |
+
+With a positive play cost, a jackpot empties the machine. Subsequent plays return **400** with `INSUFFICIENT_FLOAT`, empty slots, and no charge or payout. Rejection also occurs at any balance below the cost, not only zero. Create a new machine to continue; there is no refill endpoint.
+
 ## Test and build
 
 Run the automated tests:
@@ -22,7 +89,28 @@ Run the automated tests:
 ./mvnw test
 ```
 
-The current tests cover Spring context startup and repository lookup, save, and replacement behavior. Domain tests use a mocked random source to cover matching and mixed colours, successive spins, immutable spin outcomes, and all seven payout decisions. Run only the payout tests with `./mvnw -Dtest=FruitMachinePayoutTests test`.
+The latest verified suite contains **57 tests**, with zero failures or errors. Tests use deterministic random values for game rules; HTTP tests start a real server on a random local port, so a separately running application is not required.
+
+| Test class | Coverage |
+| --- | --- |
+| `FruitMachineTests` | Spins, jackpot detection, immutable outcomes |
+| `FruitMachinePayoutTests` | All seven payout decisions, rounding, shortfalls, insufficient float |
+| `GeneralisedMachineTests` | Configurable slots/colours/k, boundaries, large palettes and rows |
+| `InMemoryMachineRepositoryTests` | Missing IDs, saving and replacing machine state |
+| `MachineMockMvcTests` | Configure/get/play round trip, unknown-machine 404, invalid-k 400 naming the field |
+| `MachineApiTests` | HTTP creation, retrieval, plays, state updates, validation and errors |
+| `FruitMachineApplicationTests` | Spring application context startup |
+
+Run a focused suite:
+
+```sh
+./mvnw -Dtest=MachineApiTests test
+./mvnw -Dtest=MachineMockMvcTests test
+./mvnw -Dtest=FruitMachinePayoutTests test
+./mvnw -Dtest=GeneralisedMachineTests test
+```
+
+Maven reports `BUILD SUCCESS` on success. Detailed test reports are written to `target/surefire-reports/`.
 
 Run a clean build, including tests and executable JAR packaging:
 
@@ -52,7 +140,7 @@ Base package: `com.andredurante.fruitmachine`.
 - `service`: machine service and repository interface.
 - `storage`: in-memory repository implementation.
 - `api`: HTTP endpoints, including the health check.
-- `config`: future application configuration.
+- `config`: Spring bean wiring for the plain service, repository, and random factory.
 
 Dependencies: `spring-boot-starter-web`, `spring-boot-starter-validation`, `springdoc-openapi-starter-webmvc-ui`, `spring-boot-starter-actuator`, and `spring-boot-starter-test` (test scope).
 
@@ -68,7 +156,16 @@ boolean jackpot = outcome.isJackpot();
 
 ## REST API
 
-All monetary fields are **integer cents**. Start the application, then create a machine:
+All monetary fields are **integer cents**; 100 means $1. Creation fields are required even where the domain constructors provide defaults.
+
+| Method | Path | Purpose | Success |
+| --- | --- | --- | --- |
+| POST | `/machines` | Create a configured machine | 201 + Location header |
+| GET | `/machines/{id}` | Read current float and configuration | 200 |
+| POST | `/machines/{id}/plays` | Charge, spin, and settle a play | 200 |
+| GET | `/health` | Application liveness | 200 |
+
+Start the application, then create a machine:
 
 ```sh
 curl -i -X POST http://localhost:8080/machines \
@@ -84,6 +181,15 @@ curl -X POST http://localhost:8080/machines/REPLACE_WITH_ID/plays
 ```
 
 GET returns the current balance and original configuration. A successful play returns **200** with `outcome`, `slots` (colour IDs), `prizeCents`, `paidCents`, `freePlaysCredited`, and the remaining `floatCents`. Credits refer to that play's shortfall; redemption is not implemented.
+
+| Response field | Meaning |
+| --- | --- |
+| `outcome` | JACKPOT, FULL_HOUSE, SMALL_PRIZE, NO_PRIZE, or INSUFFICIENT_FLOAT |
+| `slots` | Ordered colour IDs; empty for rejected plays |
+| `prizeCents` | Prize won before limiting cash to available float |
+| `paidCents` | Cash actually paid |
+| `freePlaysCredited` | Rounded-up credit for this play's unpaid prize; not a cumulative balance |
+| `floatCents` | Machine balance after cost and payout |
 
 All creation fields are required. Validation requires positive slot count, `1 <= k <= slotCount`, at least two distinct non-blank colour IDs (duplicates rejected), and non-negative cost and starting float. Cost is limited to `Long.MAX_VALUE / 5` so the five-times-cost prize fits in integer cents. Fractional numbers are rejected. Invalid input returns **400** with a clear `message`; malformed UUIDs return **400** and unknown IDs return **404**. Insufficient float returns **400** with the `INSUFFICIENT_FLOAT` outcome, empty slots, zero payout/credits, and unchanged balance.
 
@@ -104,7 +210,7 @@ PlayOutcome result = machine.play();
 
 The palette is an immutable per-machine list; M is its size. IDs are non-blank, case-sensitive strings and must be unique within the palette. `Colour` is a value record: equal IDs match even when represented by different Java objects. The named default colours remain constants for convenience, not an exhaustive enum. Each slot samples uniformly from the configured palette using the injected `Random`.
 
-N must be positive, the palette must be non-empty, and `1 <= k <= N`. k=1 qualifies any spin for the small-prize check, but jackpot and full-house still take precedence. With N=1, jackpot takes precedence. Full house means every slot differs, not that every available colour appears; when N exceeds M, full house is impossible. These are configuration value invariants; no new service or HTTP validation flow is introduced.
+N must be positive, the palette must be non-empty, and `1 <= k <= N`. k=1 qualifies any spin for the small-prize check, but jackpot and full-house still take precedence. With N=1, jackpot takes precedence. Full house means every slot differs, not that every available colour appears; when N exceeds M, full house is impossible. The domain palette can contain one colour, but the REST API requires at least two distinct colours. API validation runs before the service is called.
 
 ### Linear-time small-prize detection
 
@@ -158,7 +264,7 @@ The following decisions govern the implemented payout rules.
 - **Money uses integer cents (`long`), and half the float rounds down:** integer arithmetic avoids floating-point rounding errors, and rounding down prevents paying a fraction more than the available float.
 - **Shortfalls award `ceil(shortfall / cost)` free plays:** pay the available cash and credit free plays for the unpaid amount. Jackpot cannot fall short because its prize is the entire available float. Rounding up compensates the full shortfall; rounding down would under-compensate the player.
 - **At most one flat small-prize payout per play:** separate adjacent runs do not stack payouts. The brief describes a single outcome tier and does not ask for per-run bonuses.
-- **Reject a play when the float is below the play cost:** return a distinct insufficient-float outcome without spinning, charging, or mutating state. A negative float is not meaningful, and the distinct outcome can later support an API 4xx response.
+- **Reject a play when the float is below the play cost:** return a distinct insufficient-float outcome without spinning, charging, or mutating state. A negative float is not meaningful, and the distinct outcome maps to HTTP 400 in the API.
 
 - **Use a configurable palette of colour IDs rather than an enum:** machines can have different palettes containing hundreds of colours without changing application code; value equality gives stable matching semantics.
 - **Detect k-length runs with a running streak:** one pass and constant auxiliary space avoid O(n·k) window rescans as slot counts and k grow.
@@ -182,7 +288,7 @@ The multi-stage image runs `mvn package` (including tests) with Maven and JDK 21
 
 Run either the local application or the container on port 8080. If that port is already occupied, use `-p 8081:8080` and check `http://localhost:8081/health` instead. Rebuild the image after source changes.
 
-The initial Docker skeleton was verified locally: its build and three tests passed, and the running container's `/health` endpoint returned HTTP 200 with `{"status":"UP"}`. Rebuild to include the core spin changes.
+Open the same Swagger URL to test the container. Rebuild after code changes; an older local image will not include new endpoints. Each container starts with an empty machine repository.
 
 ## Continuous integration
 
@@ -192,7 +298,7 @@ Keep the POM, Docker image tags, and CI Java version aligned when upgrading Java
 
 ## What I left out
 
-Persistence across restarts, concurrency control for simultaneous plays on one machine, authentication, rate limiting, and free-play redemption. The concurrent map protects map operations, not multi-step balance changes inside an individual machine.
+Persistence across restarts, concurrency control for simultaneous plays on one machine, authentication, rate limiting, free-play redemption, and a refill endpoint. The concurrent map protects map operations, not multi-step balance changes inside an individual machine.
 
 ## AI usage
 
