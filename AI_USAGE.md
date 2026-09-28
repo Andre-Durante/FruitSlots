@@ -91,6 +91,34 @@ Record AI-assisted project requests in chronological order only when the user ex
 
 **Validation:** `./mvnw -B test` passed all 54 tests, including 14 real HTTP integration cases. Tests exercise create/get/play/state retrieval, custom-cost shortfall credits, depleted float, zero-cost plays, malformed JSON/IDs, unknown IDs, missing and invalid fields, duplicate/insufficient palettes, fractional cents, and overflow bounds. Existing game/payout tests pass. `git diff --check` passed.
 
+## 2026-09-28 — Review edge cases without patches
+
+**Tool:** OpenAI Codex
+
+**User prompt:**
+
+> **Poke holes, don't patch yet**
+>
+> Review FruitMachine and the REST layer as a strict reviewer. List edge cases I'm missing. free plays interacting with a play that itself can't be paid, a machine configured with one colour, k=1, concurrent plays hitting the same machine id. Don't fix anything, just list them with one line each on why they matter.
+>
+> Add to AI usage
+
+**Review findings:** Free-play credits are returned but not stored or redeemable, and shortfall settlement empties the float so the next positive-cost play is rejected. A one-colour palette is rejected by REST but accepted by the domain and guarantees jackpots. k=1 eliminates no-prize outcomes; N=1 guarantees jackpots; k=N makes the small-prize tier unreachable due to jackpot precedence; N>M makes full house impossible. Concurrent plays and reads are not atomic. Retried POST requests can create additional plays/charges. Slot count, palette size, and machine count have no application-level resource caps. A failure after cost deduction can leave state changed without a successful response. Zero-cost play is allowed even at zero float. Direct domain callers can bypass API cost bounds and trigger invalid arithmetic. Colour IDs distinguish case and whitespace. Some are intentional rules or documented exclusions, not implementation defects.
+
+**Changes:** AI usage log only; no application code or tests changed.
+
+**Validation:** Static inspection of domain, service, and REST code; no tests run for this review. `git diff --check` passed.
+
+## 2026-09-28 — Store free plays and make generation precede settlement
+
+**Tool:** OpenAI Codex
+
+**User prompt (summary):** Fix only three reviewed issues: store and consume free-play credits before paid plays; reject play cost <= 0 in configuration validation; generate and classify the full spin before charging or applying payouts. Document the remaining review cases as “Expected behaviour, not a bug” (one colour, k=1, k=N, one slot, N>M, validated-input trust) and “Left out, would add with more time” (concurrency, intermediate GETs, POST retries, resource bounds), one line each with consequences/reasoning or proposed remedies. Add to AI usage.
+
+**Changes:** Added a machine-level free-play counter, consumed only after successful generation/classification and replenished by shortfall awards. Credits bypass the paid-play float check and cost charge. GET machine includes the remaining `freePlays`; play responses retain the newly credited count. API cost validation now requires a strictly positive value. Split outcome classification from financial settlement, retaining post-charge payout computation for paid plays. Updated README semantics and the two requested review groups. No concurrency, idempotency, resource-limit, colour, or k-rule fixes were made.
+
+**Validation:** `./mvnw -B test` passed 61 tests with zero failures/errors. Regression coverage includes persisted HTTP credits, exhaustion and subsequent paid-play rejection, zero-cost rejection, zero-float acceptance, free plays awarding new credits, and generation exceptions preserving cash and credits. `git diff --check` passed.
+
 ## Entry template
 
 - Date:

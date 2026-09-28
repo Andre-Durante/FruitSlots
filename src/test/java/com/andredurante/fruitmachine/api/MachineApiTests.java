@@ -26,7 +26,7 @@ class MachineApiTests {
         @Bean @Primary MachineService testService(MachineRepository repository) {
             return new MachineService(repository, () -> {
                 Random random = mock(Random.class);
-                when(random.nextInt(3)).thenReturn(0, 0, 1, 2);
+                when(random.nextInt(3)).thenReturn(0, 0, 1, 2, 0, 1, 0, 1);
                 return random;
             });
         }
@@ -58,17 +58,19 @@ class MachineApiTests {
         assertThat((Integer) JsonPath.read(play.body(), "$.paidCents")).isEqualTo(549);
         assertThat((Integer) JsonPath.read(play.body(), "$.freePlaysCredited")).isEqualTo(3);
         assertThat((Integer) JsonPath.read(request("GET", location, null).body(), "$.floatCents")).isZero();
-        var rejected = request("POST", location + "/plays", null);
-        assertThat(rejected.statusCode()).isEqualTo(400);
-        assertThat(rejected.body()).contains("INSUFFICIENT_FLOAT");
+        assertThat((Integer) JsonPath.read(request("GET", location, null).body(), "$.freePlays")).isEqualTo(3);
+        for (int i = 0; i < 3; i++) {
+            assertThat(request("POST", location + "/plays", null).statusCode()).isEqualTo(200);
+        }
+        assertThat((Integer) JsonPath.read(request("GET", location, null).body(), "$.freePlays")).isZero();
+        assertThat(request("POST", location + "/plays", null).statusCode()).isEqualTo(400);
     }
     @Test
-    void zeroCostAndZeroFloatAreAllowed() throws Exception {
-        var created = request("POST", "/machines", body(0, 0));
-        assertThat(created.statusCode()).isEqualTo(201);
-        var play = request("POST", created.headers().firstValue("location").orElseThrow() + "/plays", null);
-        assertThat(play.statusCode()).isEqualTo(200);
-        assertThat((Integer) JsonPath.read(play.body(), "$.freePlaysCredited")).isZero();
+    void zeroCostIsRejectedButZeroFloatIsAllowed() throws Exception {
+        var invalid = request("POST", "/machines", body(0, 0));
+        assertThat(invalid.statusCode()).isEqualTo(400);
+        assertThat(invalid.body()).contains("playCostCents");
+        assertThat(request("POST", "/machines", body(100, 0)).statusCode()).isEqualTo(201);
     }
     @ParameterizedTest
     @ValueSource(strings = {

@@ -14,6 +14,7 @@ public class FruitMachine {
     private final Random random;
     private final MachineConfiguration configuration;
     private long floatCents;
+    private long freePlays;
     private final long playCostCents;
     private final long startingFloatCents;
 
@@ -49,6 +50,8 @@ public class FruitMachine {
         return floatCents;
     }
 
+    public long freePlays() { return freePlays; }
+
     public MachineConfiguration configuration() { return configuration; }
 
     public long startingFloatCents() { return startingFloatCents; }
@@ -56,23 +59,34 @@ public class FruitMachine {
     public long playCostCents() { return playCostCents; }
 
     public PlayOutcome play() {
-        if (floatCents < playCostCents) {
+        boolean useFreePlay = freePlays > 0;
+        if (!useFreePlay && floatCents < playCostCents) {
             return new PlayOutcome(PrizeTier.INSUFFICIENT_FLOAT, Optional.empty(),
                     0, 0, 0, floatCents);
         }
 
-        floatCents -= playCostCents;
+        // Generate and classify completely before changing cash or consuming a credit.
         SpinOutcome spin = spin();
-        if (spin.isJackpot()) {
-            return pay(PrizeTier.JACKPOT, spin, floatCents);
+        PrizeTier tier = classify(spin);
+        if (useFreePlay) {
+            freePlays--;
+        } else {
+            floatCents -= playCostCents;
         }
-        if (spin.isFullHouse()) {
-            return pay(PrizeTier.FULL_HOUSE, spin, floatCents / 2);
-        }
-        if (spin.hasMatchingRun(configuration.smallPrizeWindow())) {
-            return pay(PrizeTier.SMALL_PRIZE, spin, 5 * playCostCents);
-        }
-        return pay(PrizeTier.NO_PRIZE, spin, 0);
+        long prize = switch (tier) {
+            case JACKPOT -> floatCents;
+            case FULL_HOUSE -> floatCents / 2;
+            case SMALL_PRIZE -> 5 * playCostCents;
+            default -> 0;
+        };
+        return pay(tier, spin, prize);
+    }
+
+    private PrizeTier classify(SpinOutcome spin) {
+        if (spin.isJackpot()) return PrizeTier.JACKPOT;
+        if (spin.isFullHouse()) return PrizeTier.FULL_HOUSE;
+        if (spin.hasMatchingRun(configuration.smallPrizeWindow())) return PrizeTier.SMALL_PRIZE;
+        return PrizeTier.NO_PRIZE;
     }
 
     private PlayOutcome pay(PrizeTier tier, SpinOutcome spin, long prizeCents) {
@@ -81,6 +95,7 @@ public class FruitMachine {
         long freePlays = shortfall == 0 ? 0 : shortfall / playCostCents
                 + (shortfall % playCostCents == 0 ? 0 : 1);
         floatCents -= paidCents;
+        this.freePlays += freePlays;
         return new PlayOutcome(tier, Optional.of(spin), prizeCents,
                 paidCents, freePlays, floatCents);
     }

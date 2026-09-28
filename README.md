@@ -74,12 +74,12 @@ For each creation case, start with the sample request and change the specified f
 | Fractional cents, such as `playCostCents: 100.5` | 400 |
 | Omit a required field | 400 |
 | `startingFloatCents: 99`, `playCostCents: 100` | Creation returns 201; play returns 400 `INSUFFICIENT_FLOAT`; GET still shows 99 |
-| Cost and starting float both 0 | Creation and play succeed; no division-by-zero error |
+| Cost 0 | 400 naming `playCostCents`; starting float 0 is still allowed |
 | GET or play with an unknown valid UUID | 404 |
 | GET with a malformed UUID | 400 |
 | Restart the app, then GET an old machine ID | 404: machines are not persisted |
 
-With a positive play cost, a jackpot empties the machine. Subsequent plays return **400** with `INSUFFICIENT_FLOAT`, empty slots, and no charge or payout. Rejection also occurs at any balance below the cost, not only zero. Create a new machine to continue; there is no refill endpoint.
+With a positive play cost, a jackpot empties the machine. If no free-play credits remain, subsequent plays return **400** with `INSUFFICIENT_FLOAT`, empty slots, and no charge or payout. Without free-play credits, rejection also occurs at any balance below the cost, not only zero. Create a new machine to continue; there is no refill endpoint.
 
 ## Test and build
 
@@ -89,11 +89,12 @@ Run the automated tests:
 ./mvnw test
 ```
 
-The latest verified suite contains **57 tests**, with zero failures or errors. Tests use deterministic random values for game rules; HTTP tests start a real server on a random local port, so a separately running application is not required.
+The latest verified suite contains **61 tests**, with zero failures or errors. Tests use deterministic random values for game rules; HTTP tests start a real server on a random local port, so a separately running application is not required.
 
 | Test class | Coverage |
 | --- | --- |
 | `FruitMachineTests` | Spins, jackpot detection, immutable outcomes |
+| `FreePlayTests` | Stored credits, consumption, new credits from free plays, generation-failure state preservation |
 | `FruitMachinePayoutTests` | All seven payout decisions, rounding, shortfalls, insufficient float |
 | `GeneralisedMachineTests` | Configurable slots/colours/k, boundaries, large palettes and rows |
 | `InMemoryMachineRepositoryTests` | Missing IDs, saving and replacing machine state |
@@ -180,7 +181,7 @@ curl http://localhost:8080/machines/REPLACE_WITH_ID
 curl -X POST http://localhost:8080/machines/REPLACE_WITH_ID/plays
 ```
 
-GET returns the current balance and original configuration. A successful play returns **200** with `outcome`, `slots` (colour IDs), `prizeCents`, `paidCents`, `freePlaysCredited`, and the remaining `floatCents`. Credits refer to that play's shortfall; redemption is not implemented.
+GET returns the current balance and original configuration. A successful play returns **200** with `outcome`, `slots` (colour IDs), `prizeCents`, `paidCents`, `freePlaysCredited`, and the remaining `floatCents`. Credits refer to that play's shortfall and are added to the machine's stored `freePlays` counter. GET returns that remaining counter; a play automatically consumes one credit before considering a paid play, skipping the cost even if the float is zero.
 
 | Response field | Meaning |
 | --- | --- |
@@ -191,9 +192,9 @@ GET returns the current balance and original configuration. A successful play re
 | `freePlaysCredited` | Rounded-up credit for this play's unpaid prize; not a cumulative balance |
 | `floatCents` | Machine balance after cost and payout |
 
-All creation fields are required. Validation requires positive slot count, `1 <= k <= slotCount`, at least two distinct non-blank colour IDs (duplicates rejected), and non-negative cost and starting float. Cost is limited to `Long.MAX_VALUE / 5` so the five-times-cost prize fits in integer cents. Fractional numbers are rejected. Invalid input returns **400** with a clear `message`; malformed UUIDs return **400** and unknown IDs return **404**. Insufficient float returns **400** with the `INSUFFICIENT_FLOAT` outcome, empty slots, zero payout/credits, and unchanged balance.
+All creation fields are required. Validation requires positive slot count, `1 <= k <= slotCount`, at least two distinct non-blank colour IDs (duplicates rejected), a strictly positive cost, and a non-negative starting float. Cost is limited to `Long.MAX_VALUE / 5` so the five-times-cost prize fits in integer cents. Fractional numbers are rejected. Invalid input returns **400** with a clear `message`; malformed UUIDs return **400** and unknown IDs return **404**. Insufficient float returns **400** with the `INSUFFICIENT_FLOAT` outcome, empty slots, zero payout/credits, and unchanged balance.
 
-A zero-cost play is allowed: its small prize is zero, while jackpot/full-house still use the available float. No shortfall is possible at zero cost, so no division by zero or free-play credit occurs.
+Zero-cost configuration is rejected with HTTP 400. Free plays use a stored credit, not a zero configured cost; their prizes still follow the normal payout rules and can generate further shortfall credits.
 
 `MachineService` has no Spring annotations. Configuration beans wire its repository and random-source factory; controllers validate and translate HTTP requests, while domain classes retain game rules. The repository holds a `Map<UUID, FruitMachine>` in memory, and **all machines disappear on restart**.
 
@@ -233,7 +234,7 @@ Run the generalisation tests with `./mvnw -Dtest=GeneralisedMachineTests test`.
 
 ## Payouts and float
 
-By default a machine starts with **100,000 cents ($1,000)** and costs **100 cents ($1)** per play; both are configurable at creation. Each accepted `play()` subtracts its configured cost from the float before evaluating prizes, then subtracts the cash payout. The cost is subtracted, not added, as specified.
+By default a machine starts with **100,000 cents ($1,000)** and costs **100 cents ($1)** per play; both are configurable at creation. Each accepted `play()` generates and classifies the complete spin before mutating state. It then consumes a free-play credit or subtracts its configured cost, computes the prize on the resulting float, and subtracts the cash payout. The cost is subtracted, not added, as specified.
 
 | Tier (checked in order) | Condition | Prize |
 | --- | --- | --- |
@@ -250,7 +251,7 @@ long freePlayCredit = result.freePlays();
 long remainingFloat = machine.floatCents();
 ```
 
-`PlayOutcome` reports a single `PrizeTier`, an optional spin, the nominal prize, cash paid, free plays credited for this play, and the remaining float. An insufficient-float result has no spin and zero prize, cash, and credits. Free-play credits are returned in the settlement; redemption is not implemented in this part.
+`PlayOutcome` reports a single `PrizeTier`, an optional spin, the nominal prize, cash paid, free plays credited for this play, and the remaining float. An insufficient-float result has no spin and zero prize, cash, and credits. Free-play credits are stored on the machine and returned as newly awarded credits in the settlement; the next play consumes one without charging the float.
 
 The constructor `FruitMachine(Random, long floatCents)` accepts an existing non-negative balance for restoration and boundary tests; that overload uses the default cost. For example, a 349-cent float becomes 249 cents after charging: a small prize pays that 249 cents and awards 3 free plays for the 251-cent shortfall. A 1,001-cent float becomes 901 cents, so a full house pays 450 cents and leaves 451 cents.
 
@@ -264,7 +265,7 @@ The following decisions govern the implemented payout rules.
 - **Money uses integer cents (`long`), and half the float rounds down:** integer arithmetic avoids floating-point rounding errors, and rounding down prevents paying a fraction more than the available float.
 - **Shortfalls award `ceil(shortfall / cost)` free plays:** pay the available cash and credit free plays for the unpaid amount. Jackpot cannot fall short because its prize is the entire available float. Rounding up compensates the full shortfall; rounding down would under-compensate the player.
 - **At most one flat small-prize payout per play:** separate adjacent runs do not stack payouts. The brief describes a single outcome tier and does not ask for per-run bonuses.
-- **Reject a play when the float is below the play cost:** return a distinct insufficient-float outcome without spinning, charging, or mutating state. A negative float is not meaningful, and the distinct outcome maps to HTTP 400 in the API.
+- **Reject a paid play when no credits remain and the float is below the play cost:** return a distinct insufficient-float outcome without spinning, charging, or mutating state. A negative float is not meaningful, and the distinct outcome maps to HTTP 400 in the API.
 
 - **Use a configurable palette of colour IDs rather than an enum:** machines can have different palettes containing hundreds of colours without changing application code; value equality gives stable matching semantics.
 - **Detect k-length runs with a running streak:** one pass and constant auxiliary space avoid O(n·k) window rescans as slot counts and k grow.
@@ -296,9 +297,27 @@ Open the same Swagger URL to test the container. Rebuild after code changes; an 
 
 Keep the POM, Docker image tags, and CI Java version aligned when upgrading Java.
 
+## Review boundaries
+
+### Expected behaviour, not a bug
+
+- **One colour:** the domain allows it and every spin jackpots because all slots necessarily match; the REST API still requires at least two distinct colours.
+- **k=1:** NO_PRIZE disappears because every slot is a qualifying run of length one, with jackpot/full-house precedence unchanged.
+- **k=N:** small-prize is unreachable because a full-row matching run is already a jackpot and the jackpot tier takes precedence.
+- **One slot:** every spin jackpots because all slots in a single-slot row match vacuously, so jackpot precedence applies.
+- **More slots than colours:** full house is impossible because at least one colour must repeat, violating the all-different rule.
+- **Domain trusts validated input:** production construction comes through the API-validated service; cost bounds are enforced there rather than duplicated in the domain.
+
+### Left out, would add with more time
+
+- **Concurrent plays:** racing balance updates can overpay or corrupt the float; add a per-machine lock around a complete play.
+- **GET during a play:** reads can observe an intermediate balance; use the same per-machine lock to capture a consistent snapshot.
+- **Retried POST requests:** retries can duplicate creation or charge/spin again; add an idempotency key with stored request results.
+- **Unbounded sizes/counts:** large slot/colour configurations or unlimited machine creation can exhaust resources; add configuration size caps and a machine-count cap.
+
 ## What I left out
 
-Persistence across restarts, concurrency control for simultaneous plays on one machine, authentication, rate limiting, free-play redemption, and a refill endpoint. The concurrent map protects map operations, not multi-step balance changes inside an individual machine.
+Persistence across restarts, authentication, rate limiting, and a refill endpoint also remain outside scope. Free-play counters, like floats, are lost on restart.
 
 ## AI usage
 

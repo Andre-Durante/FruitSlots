@@ -7,7 +7,7 @@ public record CreateMachineRequest(
         @NotNull @Positive Integer slotCount,
         @NotNull @Size(min = 2) List<@NotBlank String> colours,
         @NotNull @Positive Integer k,
-        @NotNull @PositiveOrZero @Max(1844674407370955161L) Long playCostCents,
+        @NotNull @Positive @Max(1844674407370955161L) Long playCostCents,
         @NotNull @PositiveOrZero Long startingFloatCents) {
     public void validateRelationships() {
         if (k > slotCount) throw new IllegalArgumentException("k must be <= slotCount");
